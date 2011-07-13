@@ -368,25 +368,6 @@ void Spell::EffectSchoolDMG(SpellEffectIndex effect_idx)
                             damage = m_caster->GetMaxPower(POWER_MANA);
                         break;
                     }
-                    // Polarity Shift Charges
-                    case 28062:                             // Positive Charge (Thaddius)
-                    case 28085:                             // Negative Charge (Thaddius)
-                    case 39090:                             // Positive Charge (Capacitus)
-                    case 39093:                             // Negative Charge (Capacitus)
-                    {
-                        uint32 uiAuraId = 0;
-                        switch (m_spellInfo->Id)
-                        {
-                            case 28062: uiAuraId = 28059; break;
-                            case 28085: uiAuraId = 28084; break;
-                            case 39090: uiAuraId = 39088; break;
-                            case 39093: uiAuraId = 39091; break;
-                        }
-                        // Do not damage non-players or players with same aura
-                        if (unitTarget->GetTypeId() != TYPEID_PLAYER || unitTarget->HasAura(uiAuraId))
-                            damage = 0;
-                        break;
-                    }
                     // percent max target health
                     case 29142:                             // Eyesore Blaster
                     case 35139:                             // Throw Boom's Doom
@@ -394,6 +375,33 @@ void Spell::EffectSchoolDMG(SpellEffectIndex effect_idx)
                     case 55269:                             // Deathly Stare
                     {
                         damage = damage * unitTarget->GetMaxHealth() / 100;
+                        break;
+                    }
+                    // Thaddius' charges, don't deal dmg to units with the same charge but give them the buff:
+                    // Positive Charge
+                    case 28062:
+                    {
+                        // If target is not (+) charged, then just deal dmg
+                        if (!unitTarget->HasAura(28059))
+                            break;
+
+                        if (m_caster != unitTarget)
+                            m_caster->CastSpell(m_caster, 29659, true);
+
+                        damage = 0;
+                        break;
+                    }
+                    // Negative Charge
+                    case 28085:
+                    {
+                        // If target is not (-) charged, then just deal dmg
+                        if (!unitTarget->HasAura(28084))
+                            break;
+
+                        if (m_caster != unitTarget)
+                            m_caster->CastSpell(m_caster, 29660, true);
+
+                        damage = 0;
                         break;
                     }
                     // Cataclysmic Bolt
@@ -1353,59 +1361,6 @@ void Spell::EffectDummy(SpellEffectIndex eff_idx)
                     m_caster->CastSpell(m_caster, 23782, true);
                     m_caster->CastSpell(m_caster, 23783, true);
                     return;
-                case 28089:                                 // Polarity Shift (Thaddius)
-                case 39096:                                 // Polarity Shift (Mechano-Lord Capacitus)
-                {
-                    uint32 uiPositiveDummyAura = 0;
-                    uint32 uiNegativeDummyAura = 0;
-                    // First, we remove auras from previous casts, reapplying new auras on last-target
-                    if (m_spellInfo->Id == 28089)
-                    {
-                        unitTarget->RemoveAurasDueToSpell(28059);
-                        unitTarget->RemoveAurasDueToSpell(29659);
-                        unitTarget->RemoveAurasDueToSpell(28084);
-                        unitTarget->RemoveAurasDueToSpell(29660);
-                        uiPositiveDummyAura = 28059;
-                        uiNegativeDummyAura = 28084;
-                    }
-                    else if (m_spellInfo->Id == 39096)
-                    {
-                        unitTarget->RemoveAurasDueToSpell(39088);
-                        unitTarget->RemoveAurasDueToSpell(39089);
-                        unitTarget->RemoveAurasDueToSpell(39091);
-                        unitTarget->RemoveAurasDueToSpell(39092);
-                        uiPositiveDummyAura = 39088;
-                        uiNegativeDummyAura = 39091;
-                    }
-                    if (m_UniqueTargetInfo.rbegin()->targetGUID != unitTarget->GetObjectGuid())
-                        return;
-                    // Keep Track of positive Charges
-                    uint32 maxPositiveTargets = m_UniqueTargetInfo.size() / 2;
-                    uint32 positiveChargedTargets = 0;
-                    uint32 negativeChargedTargets = 0;
-                    for (std::list<TargetInfo>::const_iterator itr = m_UniqueTargetInfo.begin(); itr != m_UniqueTargetInfo.end(); itr++)
-                    {
-                        // Skip Non-Players
-                        if (!itr->targetGUID.IsPlayer())
-                            continue;
-                        // The order of the targets is not entirely random, hence add some randomness with urand(0, 1)
-                        // apply positive, by random or if we have enough negative already
-                        if (Unit* pTarget = m_caster->GetMap()->GetUnit(itr->targetGUID))
-                        {
-                            if (positiveChargedTargets < maxPositiveTargets && (urand(0, 1) || negativeChargedTargets >= maxPositiveTargets))
-                            {
-                                pTarget->CastSpell(pTarget, uiPositiveDummyAura, true);
-                                positiveChargedTargets++;
-                            }
-                            else                            // apply negative
-                            {
-                                pTarget->CastSpell(pTarget, uiNegativeDummyAura, true);
-                                negativeChargedTargets++;
-                            }
-                        }
-                    }
-                    return;
-                }
                 case 24930:                                 // Hallow's End Treat
                 {
                     uint32 spell_id = 0;
@@ -1460,6 +1415,20 @@ void Spell::EffectDummy(SpellEffectIndex eff_idx)
                         m_caster->CastSpell(unitTarget, 29294, true);
 
                     return;
+                }
+                case 28089:                                 // Polarity Shift (Thaddius - Naxxramas)
+                {
+                    if (!unitTarget)
+                        return;
+
+                    // neutralize the target
+                    if (unitTarget->HasAura(28059)) unitTarget->RemoveAurasDueToSpell(28059);
+                    if (unitTarget->HasAura(29659)) unitTarget->RemoveAurasDueToSpell(29659);
+                    if (unitTarget->HasAura(28084)) unitTarget->RemoveAurasDueToSpell(28084);
+                    if (unitTarget->HasAura(29660)) unitTarget->RemoveAurasDueToSpell(29660);
+
+                    unitTarget->CastSpell(unitTarget, roll_chance_i(50) ? 28059 : 28084, true);
+                    break;
                 }
                 case 29200:                                 // Purify Helboar Meat
                 {
@@ -1667,7 +1636,7 @@ void Spell::EffectDummy(SpellEffectIndex eff_idx)
                     ((Creature*)unitTarget)->ForcedDespawn(2000);
                     float x, y, z;
                     unitTarget->GetClosePoint(x, y, z, unitTarget->GetObjectBoundingRadius(), 10.0f, unitTarget->GetOrientation());
-                    unitTarget->SendMonsterMove(x, y, z, SPLINETYPE_NORMAL, SPLINEFLAG_WALKMODE, 2000);
+                    unitTarget->MonsterMoveWithSpeed(x, y, z, 28);
                     return;
                 }
                 case 43036:                                 // Dismembering Corpse
@@ -2262,14 +2231,6 @@ void Spell::EffectDummy(SpellEffectIndex eff_idx)
                     m_caster->CastSpell(unitTarget, 50770, true);
                     return;
                 }
-                case 51369:                                 // Tickbird Signal to Fall
-                {
-                    if (!unitTarget)
-                        return;
-
-                    unitTarget->DealDamage(unitTarget, unitTarget->GetMaxHealth(), NULL, DIRECT_DAMAGE, SPELL_SCHOOL_MASK_NORMAL, NULL, false);
-                    return;
-                }
                 case 51420:                                 // Digging for Treasure Ping
                 {
                     if (!unitTarget || unitTarget->GetTypeId() != TYPEID_UNIT)
@@ -2354,7 +2315,7 @@ void Spell::EffectDummy(SpellEffectIndex eff_idx)
                         if (unitTarget->hasUnitState(UNIT_STAT_FOLLOW | UNIT_STAT_FOLLOW_MOVE))
                             unitTarget->GetMotionMaster()->MovementExpired();
 
-                        unitTarget->MonsterMove(pTargetDummy->GetPositionX(), pTargetDummy->GetPositionY(), pTargetDummy->GetPositionZ(), IN_MILLISECONDS);
+                        unitTarget->MonsterMoveWithSpeed(pTargetDummy->GetPositionX(), pTargetDummy->GetPositionY(), pTargetDummy->GetPositionZ(), 24.f);
 
                         // Add state to temporarily prevent follow
                         unitTarget->addUnitState(UNIT_STAT_ROOT);
@@ -2569,6 +2530,51 @@ void Spell::EffectDummy(SpellEffectIndex eff_idx)
                     m_caster->CastSpell(m_caster, 54851, true);
                     return;
                 }
+                case 54517:                                 // Magnetic Pull
+                {
+                    // Feugen casts on Stalagg
+                    if (m_caster->GetTypeId() != TYPEID_UNIT || unitTarget->GetTypeId() != TYPEID_UNIT)
+                        return;
+
+                    if (m_caster->GetEntry() == 15930 && unitTarget->GetEntry() == 15929)
+                    {
+                        Unit *pFeugenVictim = m_caster->getVictim();
+                        Unit *pStalaggVictim = unitTarget->getVictim();
+
+                        if (pFeugenVictim && pStalaggVictim)
+                        {
+                            pStalaggVictim->CastSpell(m_caster, 54485, true);
+                            pFeugenVictim->CastSpell(unitTarget, 54485, true);
+
+                            // threat swap
+                            m_caster->AddThreat(pStalaggVictim, m_caster->getThreatManager().getThreat(pFeugenVictim));
+                            unitTarget->AddThreat(pFeugenVictim, m_caster->getThreatManager().getThreat(pStalaggVictim));
+                            m_caster->getThreatManager().modifyThreatPercent(pFeugenVictim, -101);
+                            unitTarget->getThreatManager().modifyThreatPercent(pStalaggVictim, -101);
+
+                            // stop moving for a moment
+                            m_caster->GetMotionMaster()->Clear();
+                            m_caster->GetMotionMaster()->MoveIdle();
+                            unitTarget->GetMotionMaster()->Clear();
+                            unitTarget->GetMotionMaster()->MoveIdle();
+                        }
+                    }
+                    return;
+                }
+                case 54092:                                 // Monster Slayer's Kit 
+                { 
+                    uint32 spell_id = 0; 
+                    switch(urand(0,3)) 
+                    { 
+                        case 0: spell_id = 51853; break; 
+                        case 1: spell_id = 54063; break; 
+                        case 2: spell_id = 54071; break; 
+                        case 3: spell_id = 54086; break; 
+                        default: return;                        
+                    } 
+                    m_caster->CastSpell(unitTarget,spell_id,true,NULL); 
+                    return; 
+                }
                 case 55004:                                 // Nitro Boosts
                 {
                     if (!m_CastItem)
@@ -2692,7 +2698,7 @@ void Spell::EffectDummy(SpellEffectIndex eff_idx)
                 }
                 case 64385:                                 // Spinning (from Unusual Compass)
                 {
-                    m_caster->SetFacingTo(frand(0, M_PI_F*2), true);
+                    m_caster->SetFacingTo(frand(0, M_PI_F*2));
                     return;
                 }
                 case 64981:                                 // Summon Random Vanquished Tentacle
@@ -5638,11 +5644,8 @@ void Spell::EffectDistract(SpellEffectIndex /*eff_idx*/)
     if (unitTarget->hasUnitState(UNIT_STAT_CAN_NOT_REACT))
         return;
 
-    float angle = unitTarget->GetAngle(m_targets.m_destX, m_targets.m_destY);
-
+    unitTarget->SetFacingTo(unitTarget->GetAngle(m_targets.m_destX, m_targets.m_destY));
     unitTarget->clearUnitState(UNIT_STAT_MOVING);
-    unitTarget->SetOrientation(angle);
-    unitTarget->SendMonsterMove(unitTarget->GetPositionX(), unitTarget->GetPositionY(), unitTarget->GetPositionZ(), SPLINETYPE_FACINGANGLE, SPLINEFLAG_WALKMODE, 0, NULL, angle);
 
     if (unitTarget->GetTypeId() == TYPEID_UNIT)
         unitTarget->GetMotionMaster()->MoveDistract(damage * IN_MILLISECONDS);
@@ -8021,6 +8024,19 @@ void Spell::EffectScriptEffect(SpellEffectIndex eff_idx)
 
                     break;
                 }
+                case 53110:									// Devour Humanoid
+                {
+                    if (!unitTarget || unitTarget->GetTypeId() != TYPEID_UNIT || !m_caster)
+                        return;
+
+
+                    // check if the distance to the npc is only 15
+                    if(15.0f >= m_caster->GetDistance(unitTarget->GetPositionX(), unitTarget->GetPositionY(), unitTarget->GetPositionZ()))
+                    {
+                            m_caster->SetPower(POWER_MANA, m_caster->GetMaxPower(POWER_MANA));
+                    }
+                    return;
+                }
                 case 53242:                                 // Clear Gift of Tharonja
                 {
                     if (!unitTarget || !unitTarget->HasAura(52509))
@@ -10014,7 +10030,7 @@ void Spell::EffectCharge(SpellEffectIndex /*eff_idx*/)
         ((Creature *)unitTarget)->StopMoving();
 
     // Only send MOVEMENTFLAG_WALK_MODE, client has strange issues with other move flags
-    m_caster->MonsterMove(x, y, z, 1);
+    m_caster->MonsterMoveWithSpeed(x, y, z, 24.f);
 
     // not all charge effects used in negative spells
     if (unitTarget != m_caster && !IsPositiveSpell(m_spellInfo->Id))
@@ -10046,7 +10062,7 @@ void Spell::EffectCharge2(SpellEffectIndex /*eff_idx*/)
     unitTarget->UpdateGroundPositionZ(x, y, z);
 
     // Only send MOVEMENTFLAG_WALK_MODE, client has strange issues with other move flags
-    m_caster->MonsterMove(x, y, z, 1);
+    m_caster->MonsterMoveWithSpeed(x, y, z, 24.f);
 
     // not all charge effects used in negative spells
     if (unitTarget && unitTarget != m_caster && !IsPositiveSpell(m_spellInfo->Id))
@@ -10343,27 +10359,41 @@ void Spell::EffectTransmitted(SpellEffectIndex eff_idx)
         float max_dis = GetSpellMaxRange(sSpellRangeStore.LookupEntry(m_spellInfo->rangeIndex));
         float dis = rand_norm_f() * (max_dis - min_dis) + min_dis;
 
-        m_caster->GetClosePoint(fx, fy, fz, DEFAULT_WORLD_OBJECT_SIZE, dis);
+        // special code for fishing bobber (TARGET_SELF_FISHING), should not try to avoid objects
+        // nor try to find ground level, but randomly vary in angle
+        if (goinfo->type == GAMEOBJECT_TYPE_FISHINGNODE)
+        {
+            // calculate angle variation for roughly equal dimensions of target area
+            float max_angle = (max_dis - min_dis)/(max_dis + m_caster->GetObjectBoundingRadius());
+            float angle_offset = max_angle * (rand_norm_f() - 0.5f);
+            m_caster->GetNearPoint2D(fx, fy, dis, m_caster->GetOrientation() + angle_offset);
+
+            GridMapLiquidData liqData;
+            if (!m_caster->GetTerrain()->IsInWater(fx, fy, m_caster->GetPositionZ() + 1.f, &liqData))
+            {
+                SendCastResult(SPELL_FAILED_NOT_FISHABLE);
+                SendChannelUpdate(0);
+                return;
+            }
+
+            fz = liqData.level;
+            // finally, check LoS
+            if (!m_caster->IsWithinLOS(fx, fy, fz))
+            {
+                SendCastResult(SPELL_FAILED_LINE_OF_SIGHT);
+                SendChannelUpdate(0);
+                return;
+            }
+        }
+        else
+            m_caster->GetClosePoint(fx, fy, fz, DEFAULT_WORLD_OBJECT_SIZE, dis);
     }
 
     Map *cMap = m_caster->GetMap();
 
-    if(goinfo->type==GAMEOBJECT_TYPE_FISHINGNODE)
-    {
-        GridMapLiquidData liqData;
-        if ( !m_caster->GetTerrain()->IsInWater(fx, fy, fz + 1.f/* -0.5f */, &liqData))             // Hack to prevent fishing bobber from failing to land on fishing hole
-        { // but this is not proper, we really need to ignore not materialized objects
-            SendCastResult(SPELL_FAILED_NOT_HERE);
-            SendChannelUpdate(0);
-            return;
-        }
 
-        // replace by water level in this case
-        //fz = cMap->GetWaterLevel(fx, fy);
-        fz = liqData.level;
-    }
     // if gameobject is summoning object, it should be spawned right on caster's position
-    else if(goinfo->type==GAMEOBJECT_TYPE_SUMMONING_RITUAL)
+    if (goinfo->type == GAMEOBJECT_TYPE_SUMMONING_RITUAL)
     {
         m_caster->GetPosition(fx, fy, fz);
     }
@@ -10944,7 +10974,7 @@ void Spell::EffectServerSide(SpellEffectIndex eff_idx)
                 {
                     if (SpellAuraHolder* holder = unitTarget->GetSpellAuraHolder((triggerID == 67712 ? 67713 : 67759)))
                     {
-                        if ( holder->GetStackAmount() + 1 > triggerSpell->EffectBasePoints[EFFECT_INDEX_0] )
+                        if ( holder->GetStackAmount() + 1 > uint32(triggerSpell->EffectBasePoints[EFFECT_INDEX_0] ))
                         {
                             unitTarget->RemoveAurasDueToSpell(triggerID == 67712 ? 67713 : 67759);
                             if (unitTarget->getVictim())

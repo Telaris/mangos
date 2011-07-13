@@ -1048,7 +1048,7 @@ bool Aura::IsEffectStacking()
     SpellEntry const *spellProto = GetSpellProto();
 
     // generic check
-    if (spellProto->AttributesEx6 & (SPELL_ATTR_EX6_NO_STACK_DEBUFF | SPELL_ATTR_EX6_NO_STACK_BUFF))
+    if (spellProto->AttributesEx6 & (SPELL_ATTR_EX6_DEBUFF_MAJOR | SPELL_ATTR_EX6_DEBUFF_MAJOR))
     {
         // Mark/Gift of the Wild early exception check
         if (spellProto->IsFitToFamily(SPELLFAMILY_DRUID, UI64LIT(0x0000000000040000)))
@@ -1163,6 +1163,11 @@ void Aura::HandleAddModifier(bool apply, bool Real)
             case 57761:                                     // Fireball!
             case 64823:                                     // Elune's Wrath (Balance druid t8 set
                 GetHolder()->SetAuraCharges(1);
+                break;
+            case 53257:                                     // Cobra strike 2 stack on apply (maximal value! not +2)
+                GetHolder()->SetStackAmount(2);
+                break;
+            default:
                 break;
         }
 
@@ -1399,14 +1404,48 @@ void Aura::TriggerSpell()
                     }
 //                    // Controller Timer
 //                    case 28095: break;
-//                    // Stalagg Chain
-//                    case 28096: break;
-//                    // Stalagg Tesla Passive
-//                    case 28097: break;
-//                    // Feugen Tesla Passive
-//                    case 28109: break;
-//                    // Feugen Chain
-//                    case 28111: break;
+                    // Stalagg Chain
+                    case 28096:
+                        if (Unit* pCaster = GetCaster() )
+                        {
+                            if (pCaster->GetDistance(target) > 60.0f )
+                            {
+                                pCaster->RemoveAurasDueToSpell(28096);
+                                pCaster->InterruptNonMeleeSpells(false);
+                                if (!pCaster->HasAura(28097))
+                                    pCaster->CastSpell(pCaster, 28097, true, 0, this, target->GetGUID());
+                            }
+                        }
+                        return;
+                    // Stalagg Tesla Passive
+                    case 28097:
+                        if (Unit* pStalagg = GetCaster() )
+                        {
+                            if (!target->IsNonMeleeSpellCasted(true) && pStalagg->getVictim() && pStalagg->getStandState() != UNIT_STAND_STATE_DEAD)
+                                target->CastSpell(pStalagg->getVictim(), 28099, false, 0, this);
+                        }
+                        return;
+                    // Feugen Tesla Passive
+                    case 28109:
+                        if (Unit* pFeugen = GetCaster() )
+                        {
+                            if (!target->IsNonMeleeSpellCasted(true) && pFeugen->getVictim() && pFeugen->getStandState() != UNIT_STAND_STATE_DEAD)
+                                target->CastSpell(pFeugen->getVictim(), 28099, false, 0, this);
+                        }
+                        return;
+                    // Feugen Chain
+                    case 28111:
+                        if (Unit* pCaster = GetCaster() )
+                        {
+                            if (pCaster->GetDistance(target) > 60.0f )
+                            {
+                                pCaster->RemoveAurasDueToSpell(28111);
+                                pCaster->InterruptNonMeleeSpells(false);
+                                if (!pCaster->HasAura(28109))
+                                    pCaster->CastSpell(pCaster, 28109, true, 0, this, target->GetGUID());
+                            }
+                        }
+                        return;
 //                    // Mark of Didier
 //                    case 28114: break;
 //                    // Communique Timer, camp
@@ -2054,6 +2093,18 @@ void Aura::TriggerSpell()
                 triggerTarget->CastCustomSpell(triggerTarget, trigger_spell_id, &m_modifier.m_amount, NULL, NULL, true, NULL, this);
                 return;
             }
+            case 28084:                                     // Negative Charge
+            {
+                if (triggerTarget->HasAura(29660))
+                    triggerTarget->RemoveAurasDueToSpell(29660);
+                break;
+            }
+            case 28059:                                     // Positive Charge
+            {
+                if (triggerTarget->HasAura(29659))
+                    triggerTarget->RemoveAurasDueToSpell(29659);
+                break;
+            }
             case 33525:                                     // Ground Slam
                 triggerTarget->CastSpell(triggerTarget, trigger_spell_id, true, NULL, this, casterGUID);
                 return;
@@ -2207,34 +2258,6 @@ void Aura::HandleAuraDummy(bool apply, bool Real)
                         if (Unit* caster = GetCaster())
                             caster->CastSpell(caster, 13138, true, NULL, this);
                         return;
-                    case 28059:                             // Positive Charge (Thaddius)
-                    case 28084:                             // Negative Charge (Thaddius)
-                    case 39088:                             // Positive Charge (Capacitus)
-                    case 39091:                             // Negative Charge (Capacitus)
-                    {
-                        uint32 uiBuffSpell = 0;
-                        switch (GetId())
-                        {
-                            case 28059: uiBuffSpell = 29659; break;
-                            case 28084: uiBuffSpell = 29660; break;
-                            case 39088: uiBuffSpell = 39089; break;
-                            case 39091: uiBuffSpell = 39092; break;
-                        }
-                        // Apply to each nearby friend with same aura +1 of the stacking aura - TODO range= gueswork
-                        std::list<Unit*> friendsInRange;
-                        MaNGOS::AnyFriendlyUnitInObjectRangeCheck u_check(target, 13.0f);
-                        MaNGOS::UnitListSearcher<MaNGOS::AnyFriendlyUnitInObjectRangeCheck> searcher(friendsInRange, u_check);
-                        Cell::VisitAllObjects(target, searcher, 13.0f);
-                        for (std::list<Unit*>::const_iterator itr = friendsInRange.begin(); itr != friendsInRange.end(); itr++)
-                        {
-                            if  ((*itr)->HasAura(GetId()) && (*itr) != target)
-                            {
-                                (*itr)->CastSpell(*itr, uiBuffSpell, true);
-                                target->CastSpell(target, uiBuffSpell, true, NULL, this);
-                            }
-                        }
-                        return;
-                    }
                     case 31606:                             // Stormcrow Amulet
                     {
                         CreatureInfo const * cInfo = ObjectMgr::GetCreatureTemplate(17970);
@@ -2715,20 +2738,16 @@ void Aura::HandleAuraDummy(bool apply, bool Real)
                 return;
             }
             case 28059:                                     // Positive Charge (Thaddius)
-            case 28084:                                     // Negative Charge (Thaddius)
-            case 39088:                                     // Positive Charge (Capacitus)
-            case 39091:                                     // Negative Charge (Capacitus)
             {
-                uint32 uiBuffAura = 0;
-                switch (GetId())
-                {
-                    case 28059: uiBuffAura = 29659; break;
-                    case 28084: uiBuffAura = 29660; break;
-                    case 39088: uiBuffAura = 39089; break;
-                    case 39091: uiBuffAura = 39092; break;
-                }
-                target->RemoveAurasDueToSpell(uiBuffAura);
-                break;
+                if (target->HasAura(29659))
+                    target->RemoveAurasDueToSpell(29659);
+                return;
+            }
+            case 28084:                                     // Negative Charge (Thaddius)
+            {
+                if (target->HasAura(29660))
+                    target->RemoveAurasDueToSpell(29660);
+                return;
             }
             case 28169:                                     // Mutating Injection
             {
@@ -4483,7 +4502,6 @@ void Aura::HandleModPossessPet(bool apply, bool Real)
         else
         {
             pet->GetMotionMaster()->MoveFollow(caster, PET_FOLLOW_DIST, PET_FOLLOW_ANGLE);
-            pet->AddSplineFlag(SPLINEFLAG_WALKMODE);
         }
     }
 }
@@ -10323,6 +10341,31 @@ void SpellAuraHolder::HandleSpellSpecificBoosts(bool apply)
                     spellId1 = 63311;
                 else
                     return;
+            }
+            // Shadow embrace (healing reduction part)
+            else if (m_spellProto->SpellFamilyFlags.test<CF_WARLOCK_MISC_DEBUFFS>() && m_spellProto->SpellIconID == 2209)
+            {
+                switch(GetId())
+                {
+                    case 32386:
+                        spellId1 = 60448;
+                        break;
+                    case 32388:
+                        spellId1 = 60465;
+                        break;
+                    case 32389:
+                        spellId1 = 60466;
+                        break;
+                    case 32390:
+                        spellId1 = 60467;
+                        break;
+                    case 32394:
+                        spellId1 = 60468;
+                        break;
+                    default:
+                        break;
+                }
+                break;
             }
             else
                 return;

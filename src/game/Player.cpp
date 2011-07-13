@@ -1837,6 +1837,7 @@ bool Player::TeleportTo(uint32 mapid, float x, float y, float z, float orientati
 
     // reset movement flags at teleport, because player will continue move with these flags after teleport
     m_movementInfo.SetMovementFlags(MOVEFLAG_NONE);
+    DisableSpline();
 
     if (GetMapId() == mapid && !m_transport)
     {
@@ -17523,6 +17524,8 @@ void Player::_LoadGroup(QueryResult *result)
                 sLFGMgr.LoadLFDGroupPropertiesForPlayer(this);
         }
     }
+    if (!GetGroup())
+        sLFGMgr.RemoveMemberFromLFDGroup(NULL,GetObjectGuid());
 }
 
 void Player::_LoadBoundInstances(QueryResult *result)
@@ -20831,13 +20834,7 @@ void Player::UpdateVisibilityOf(WorldObject const* viewPoint, WorldObject* targe
             // target aura duration for caster show only if target exist at caster client
             // send data at target visibility change (adding to client)
             if(target!=this && target->isType(TYPEMASK_UNIT))
-            {
                 SendAurasForTarget((Unit*)target);
-                ((Unit*)target)->SendHeartBeat(false);
-            }
-
-            if(target->GetTypeId()==TYPEID_UNIT && ((Creature*)target)->isAlive())
-                ((Creature*)target)->SendMonsterMoveWithSpeedToCurrentDestination(this);
         }
     }
 }
@@ -24199,7 +24196,7 @@ AreaLockStatus Player::GetAreaLockStatus(uint32 mapId, Difficulty difficulty)
 
 uint32 Player::GetEquipGearScore(bool withBags, bool withBank)
 {
-    if (m_cachedGS > 0)
+    if (withBags && withBank && m_cachedGS > 0)
         return m_cachedGS;
 
     GearScoreMap gearScore (MAX_INVTYPE);
@@ -24271,10 +24268,13 @@ uint32 Player::GetEquipGearScore(bool withBags, bool withBank)
     if (count)
     {
         DEBUG_LOG("Player: calculating gear score for %u. Result is %u",GetObjectGuid().GetCounter(), uint32( summ / count ));
-
-        m_cachedGS = uint32( summ / count );
-
-        return m_cachedGS;
+        if (withBags && withBank)
+        {
+            m_cachedGS = uint32( summ / count );
+            return m_cachedGS;
+        }
+        else
+            return uint32( summ / count );
     }
     else return 0;
 }
