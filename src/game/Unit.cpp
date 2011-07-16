@@ -1401,7 +1401,7 @@ uint32 Unit::SpellNonMeleeDamageLog(Unit *pVictim, uint32 spellID, uint32 damage
     return damageInfo.damage;
 }
 
-void Unit::CalculateSpellDamage(SpellNonMeleeDamage *damageInfo, int32 damage, SpellEntry const *spellInfo, WeaponAttackType attackType)
+void Unit::CalculateSpellDamage(SpellNonMeleeDamage *damageInfo, int32 damage, SpellEntry const *spellInfo, WeaponAttackType attackType, float targetSpellCoeff/* = 1.0f*/)
 {
     SpellSchoolMask damageSchoolMask = damageInfo->schoolMask;
     Unit *pVictim = damageInfo->target;
@@ -1447,7 +1447,7 @@ void Unit::CalculateSpellDamage(SpellNonMeleeDamage *damageInfo, int32 damage, S
         case SPELL_DAMAGE_CLASS_MAGIC:
         {
             // Calculate damage bonus
-            damage = SpellDamageBonusDone(pVictim, spellInfo, damage, SPELL_DIRECT_DAMAGE);
+            damage = SpellDamageBonusDone(pVictim, spellInfo, damage, SPELL_DIRECT_DAMAGE, 1, targetSpellCoeff);
             damage = pVictim->SpellDamageBonusTaken(this, spellInfo, damage, SPELL_DIRECT_DAMAGE);
 
             // If crit add critical bonus
@@ -1798,6 +1798,7 @@ void Unit::CalculateMeleeDamage(Unit *pVictim, uint32 damage, CalcDamageInfo *da
     if(int32(damageInfo->damage) > 0)
     {
         damageInfo->procVictim |= PROC_FLAG_TAKEN_ANY_DAMAGE;
+        damageInfo->procEx |= PROC_EX_DIRECT_DAMAGE;
 
         // Calculate absorb & resists
         uint32 absorb_affected_damage = CalcNotIgnoreAbsorbDamage(damageInfo->damage,damageInfo->damageSchoolMask);
@@ -1811,6 +1812,8 @@ void Unit::CalculateMeleeDamage(Unit *pVictim, uint32 damage, CalcDamageInfo *da
         if (damageInfo->resist)
             damageInfo->HitInfo|=HITINFO_RESIST;
 
+        if (damageInfo->damage <= 0)
+            damageInfo->procEx &= ~PROC_EX_DIRECT_DAMAGE;
     }
     else // Umpossible get negative result but....
         damageInfo->damage = 0;
@@ -6556,7 +6559,7 @@ int32 Unit::SpellBonusWithCoeffs(SpellEntry const *spellProto, int32 total, int3
  * Calculates caster part of spell damage bonuses,
  * also includes different bonuses dependent from target auras
  */
-uint32 Unit::SpellDamageBonusDone(Unit *pVictim, SpellEntry const *spellProto, uint32 pdamage, DamageEffectType damagetype, uint32 stack)
+uint32 Unit::SpellDamageBonusDone(Unit *pVictim, SpellEntry const *spellProto, uint32 pdamage, DamageEffectType damagetype, uint32 stack, float targetSpellCoeff/* = 1.0f*/)
 {
     if(!spellProto || !pVictim || damagetype==DIRECT_DAMAGE || spellProto->AttributesEx6 & SPELL_ATTR_EX6_NO_DMG_MODS)
         return pdamage;
@@ -6922,7 +6925,7 @@ uint32 Unit::SpellDamageBonusDone(Unit *pVictim, SpellEntry const *spellProto, u
     int32 DoneAdvertisedBenefit = SpellBaseDamageBonusDone(GetSpellSchoolMask(spellProto));
 
     // apply ap bonus and benefit affected by spell power implicit coeffs and spell level penalties
-    DoneTotal = SpellBonusWithCoeffs(spellProto, DoneTotal, DoneAdvertisedBenefit, 0, damagetype, true);
+    DoneTotal = SpellBonusWithCoeffs(spellProto, DoneTotal, DoneAdvertisedBenefit, 0, damagetype, true, targetSpellCoeff);
 
     float tmpDamage = (int32(pdamage) + DoneTotal * int32(stack)) * DoneTotalMod;
     // apply spellmod to Done damage (flat and pct)
