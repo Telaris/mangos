@@ -1075,16 +1075,6 @@ void Aura::HandleAddModifier(bool apply, bool Real)
             case 53257:                                     // Cobra strike 2 stack on apply (maximal value! not +2)
                 GetHolder()->SetStackAmount(2);
                 break;
-            // Shamanism spell coeff
-            // divided by 3 chain lighning jumps
-            case 62097: // Shamanism rank1
-            case 62098: // Shamanism rank2
-            case 62099: // Shamanism rank3
-            case 62100: // Shamanism rank4
-            case 62101: // Shamanism rank5
-                // divide by 4 with additional target from Glyph of Chain Lightning
-                m_modifier.m_amount = (int32)(ceil(m_modifier.m_amount / (GetTarget()->HasAura(55449) ? 4.0f : 3.0f)));
-                break;
             default:
                 break;
         }
@@ -2176,31 +2166,27 @@ void Aura::HandleAuraDummy(bool apply, bool Real)
                         if (Unit* caster = GetCaster())
                             caster->CastSpell(caster, 13138, true, NULL, this);
                         return;
-                    case 28832: // Mark of Korth'azz
-                    case 28833: // Mark of Blaumeux
-                    case 28834: // Mark of Rivendare
-                    case 28835: // Mark of Zeliek
+                    case 28832:                             // Mark of Korth'azz
+                    case 28833:                             // Mark of Blaumeux
+                    case 28834:                             // Mark of Rivendare
+                    case 28835:                             // Mark of Zeliek
                     {
-                         uint8 stacks = GetStackAmount();
-                         int32 damage = 0;
+                        uint32 stacks = GetStackAmount();
+                        int32 damage = 0;
+                        switch (stacks)
+                        {
+                            case 0:
+                            case 1: return;
+                            case 2: damage = 500;   break;
+                            case 3: damage = 1500;  break;
+                            case 4: damage = 4000;  break;
+                            case 5: damage = 12500; break;
+                            default: damage = 20000 + (1000 * (stacks - 6)); break;
+                        }
 
-                         if (stacks == 2)
-                            damage = 500;
-                         else if (stacks == 3)
-                            damage = 1500;
-                         else if (stacks == 4)
-                            damage = 4000;
-                         else if (stacks == 5)
-                            damage = 12500;
-                         else if (stacks > 5)
-                            damage = 20000 + 1000 * (stacks - 6);
-
-                         Unit *unitTarget = GetTarget();
-                         Unit* caster = GetCaster();
-
-                         if (caster && unitTarget)
-                             unitTarget->CastCustomSpell(unitTarget, 28836, &damage, NULL, NULL, true, NULL, this, caster->GetObjectGuid());
-                         return;
+                        if (Unit* caster = GetCaster())
+                            caster->CastCustomSpell(target, 28836, &damage, NULL, NULL, true, NULL, this, caster->GetObjectGuid());
+                        return;
                     }
                     case 31606:                             // Stormcrow Amulet
                     {
@@ -3530,6 +3516,25 @@ void Aura::HandleAuraFeatherFall(bool apply, bool Real)
     // start fall from current height
     if(!apply && target->GetTypeId() == TYPEID_PLAYER)
         ((Player*)target)->SetFallInformation(0, target->GetPositionZ());
+
+    // additional custom cases
+    if(!apply)
+    {
+        switch(GetId())
+        {
+            // Soaring - Test Flight chain
+            case 36812:
+            case 37910:
+            case 37940:
+            case 37962:
+            case 37968:
+            {
+                if(Unit* pCaster = GetCaster())
+                    pCaster->CastSpell(pCaster, 37108, true);
+                return;
+            }
+        }
+    }
 }
 
 void Aura::HandleAuraHover(bool apply, bool Real)
@@ -4853,7 +4858,7 @@ void Aura::HandleModStealth(bool apply, bool Real)
                 for(Unit::AuraList::const_iterator i = mDummyAuras.begin();i != mDummyAuras.end(); ++i)
                 {
                     // Master of Subtlety
-                    if ((*i)->GetSpellProto()->SpellIconID == 2114)
+                    if ((*i)->GetSpellProto()->SpellIconID == 2114 && GetSpellProto()->SpellFamilyName == SPELLFAMILY_ROGUE)
                     {
                         target->RemoveAurasDueToSpell(31666);
                         int32 bp = (*i)->GetModifier()->m_amount;
@@ -6584,7 +6589,15 @@ void Aura::HandleAuraModIncreaseEnergyPercent(bool apply, bool /*Real*/)
 
 void Aura::HandleAuraModIncreaseHealthPercent(bool apply, bool /*Real*/)
 {
-    GetTarget()->HandleStatModifier(UNIT_MOD_HEALTH, TOTAL_PCT, float(m_modifier.m_amount), apply);
+    Unit *unitTarget = GetTarget();
+
+    unitTarget->HandleStatModifier(UNIT_MOD_HEALTH, TOTAL_PCT, float(m_modifier.m_amount), apply);
+
+    // Molten Fury (Sartharion encounter)
+    if (GetId() == 60430)
+    {
+        unitTarget->SetHealthPercent(unitTarget->GetHealth() * 100.0f / (unitTarget->GetMaxHealth() / (1.0f + float(m_modifier.m_amount) / 100.0f)));
+    }
 }
 
 void Aura::HandleAuraIncreaseBaseHealthPercent(bool apply, bool /*Real*/)
@@ -7062,8 +7075,7 @@ void Aura::HandleShapeshiftBoosts(bool apply)
             MasterShaperSpellId = 48420;
             break;
         case FORM_TREE:
-            spellId1 = 5420;
-            spellId2 = 34123;
+            spellId1 = 34123;
             MasterShaperSpellId = 48422;
             break;
         case FORM_TRAVEL:
@@ -7640,6 +7652,12 @@ void Aura::HandleSchoolAbsorb(bool apply, bool Real)
                 ((Player*)caster)->SendModifyCooldown(spellProto->Id,-aur->GetSpellProto()->CalculateSimpleValue(EFFECT_INDEX_0)*IN_MILLISECONDS);
             }
         }
+        // Shield of Runes (Runemaster Molgeim: Ulduar)
+        else if ((GetId() == 62274 || GetId() == 63489) && m_removeMode == AURA_REMOVE_BY_SHIELD_BREAK)
+        {
+            uint32 trigger_spell_Id = GetId() == 62274 ? 62277 : 63967;
+            target->CastSpell(target, trigger_spell_Id, true);
+        }
     }
 }
 
@@ -8063,6 +8081,10 @@ void Aura::PeriodicTick()
             if (!target->isAlive())
                 return;
 
+            // don't energize isolated units (banished)
+            if (target->hasUnitState(UNIT_STAT_ISOLATED))
+                return;
+
             if(m_modifier.m_miscvalue < 0 || m_modifier.m_miscvalue >= MAX_POWERS)
                 return;
 
@@ -8157,6 +8179,10 @@ void Aura::PeriodicTick()
             if (!target->isAlive())
                 return;
 
+            // don't energize isolated units (banished)
+            if (target->hasUnitState(UNIT_STAT_ISOLATED))
+                return;
+
             // ignore non positive values (can be result apply spellmods to aura damage
             uint32 pdamage = m_modifier.m_amount > 0 ? m_modifier.m_amount : 0;
 
@@ -8184,6 +8210,10 @@ void Aura::PeriodicTick()
         {
             // don't energize target if not alive, possible death persistent effects
             if (!target->isAlive())
+                return;
+
+            // don't energize isolated units (banished)
+            if (target->hasUnitState(UNIT_STAT_ISOLATED))
                 return;
 
             Powers powerType = ( (m_modifier.m_miscvalue > POWER_RUNIC_POWER || m_modifier.m_miscvalue < 0) ? POWER_MANA : Powers(m_modifier.m_miscvalue));
@@ -8274,6 +8304,10 @@ void Aura::PeriodicTick()
         {
             // don't energize target if not alive, possible death persistent effects
             if (!target->isAlive())
+                return;
+
+            // don't energize isolated units (banished)
+            if (target->hasUnitState(UNIT_STAT_ISOLATED))
                 return;
 
             Powers pt = target->getPowerType();
@@ -8500,8 +8534,27 @@ void Aura::PeriodicDummyTick()
 //              case 46549: break;
 //              // Summon Ice Spear Knockback Delayer
 //              case 46878: break;
-//              // Burninate Effect
-//              case 47214: break;
+                case 47214: // Burninate Effect
+                {
+                    Unit * caster = GetCaster();
+                    if (!caster)
+                        return;
+
+                    if (target->GetEntry() == 26570)
+                    {
+                        if (target->HasAura(54683, EFFECT_INDEX_0))
+                            return;
+                        else
+                        {
+                            // Credit Scourge
+                            caster->CastSpell(caster, 47208, true);
+                            // set ablaze
+                            target->CastSpell(target, 54683, true);
+                            ((Creature*)target)->ForcedDespawn(4000);
+                        }
+                    }
+                    break;
+                }
 //              // Fizzcrank Practice Parachute
 //              case 47228: break;
 //              // Send Mug Control Aura
@@ -8617,6 +8670,46 @@ void Aura::PeriodicDummyTick()
                     }
 
                     break;
+                }
+                case 62038: // Biting Cold (Ulduar: Hodir)
+                {
+                    if (target->GetTypeId() != TYPEID_PLAYER)
+                        return;
+
+                    Unit * caster = GetCaster();
+                    if (!caster)
+                        return;
+
+                    if (!target->HasAura(62821))     // Toasty Fire
+                    {
+                        // dmg dealing every second
+                        target->CastSpell(target, 62188, true, 0, 0, caster->GetObjectGuid());
+                    }
+
+                    // aura stack increase every 3 (data in m_miscvalue) seconds and decrease every 1s
+                    // Reset reapply counter at move and decrease stack amount by 1
+                    if (((Player*)target)->isMoving() || target->HasAura(62821))
+                    {
+                        if (SpellAuraHolder *holder = target->GetSpellAuraHolder(62039))
+                        {
+                            if (holder->ModStackAmount(-1))
+                                target->RemoveSpellAuraHolder(holder);
+                        }
+                        m_modifier.m_miscvalue = 3;
+                        return;
+                    }
+                    // We are standing at the moment, countdown
+                    if (m_modifier.m_miscvalue > 0)
+                    {
+                        --m_modifier.m_miscvalue;
+                        return;
+                    }
+
+                    target->CastSpell(target, 62039, true);
+
+                    // recast every ~3 seconds
+                    m_modifier.m_miscvalue = 3;
+                    return;
                 }
                 case 62566:                                 // Healthy Spore Summon Periodic
                 {
@@ -9024,7 +9117,18 @@ void Aura::HandleAuraControlVehicle(bool apply, bool Real)
         if (caster->GetTypeId() == TYPEID_PLAYER)
             ((Player*)caster)->RemovePet(PET_SAVE_AS_CURRENT);
 
-        caster->EnterVehicle(target->GetVehicleKit());
+        // TODO: find a way to make this work properly
+        // some spells seem like store vehicle seat info in basepoints, but not true for all of them, so... ;/
+        // int8 seat = target->GetVehicleKit()->HasEmptySeat(GetModifier()->m_amount) ? GetModifier()->m_amount : -1;
+        // caster->EnterVehicle(target->GetVehicleKit(), seat);
+
+        int8 seat = -1;
+
+        // Slag Pot (2 seats: hand and the pot)
+        if (GetId() == 62708 || GetId() == 62711)
+            seat = GetModifier()->m_amount;
+
+        caster->EnterVehicle(target->GetVehicleKit(), seat);
     }
     else
     {
@@ -9390,7 +9494,6 @@ m_permanent(false), m_isRemovedOnShapeLost(true), m_deleted(false), m_in_use(0)
         case 62519:                                         // Attuned to Nature
         case 64455:                                         // Feral Essence
         case 71564:                                         // Deadly Precision
-        case 74396:                                         // Fingers of Frost
             m_stackAmount = m_spellProto->StackAmount;
             break;
     }
@@ -9743,6 +9846,25 @@ void SpellAuraHolder::SetStackAmount(uint32 stackAmount)
                     aur->ApplyModifier(false, true);
                     aur->GetModifier()->m_amount = amount;
                     aur->ApplyModifier(true, true);
+
+                    // change duration if aura refreshes
+                    if (refresh)
+                    {
+                        int32 maxduration = GetSpellMaxDuration(aur->GetSpellProto());
+                        int32 duration = GetSpellDuration(aur->GetSpellProto());
+
+                        // new duration based on combo points
+                        if (duration != maxduration)
+                        {
+                            if (Unit *caster = aur->GetCaster())
+                            {
+                                duration += int32((maxduration - duration) * caster->GetComboPoints() / 5);
+                                SetAuraMaxDuration(duration);
+                                SetAuraDuration(duration);
+                                refresh = false;
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -9954,6 +10076,14 @@ void SpellAuraHolder::HandleSpellSpecificBoosts(bool apply)
                     if (!apply)
                         if(Unit* caster = GetCaster())
                             caster->RemoveAurasDueToSpell(34027);
+                    return;
+                }
+                case 62619:                                 // Potent Pheromones (Freya encounter)
+                case 64321:                                 // Potent Pheromones (Freya encounter) heroic
+                {
+                    if (apply)
+                        if (Unit* target = GetTarget())
+                            target->RemoveAurasDueToSpell(62532);
                     return;
                 }
                 case 62692:                                 // Aura of Despair (General Vezax - Ulduar)

@@ -1101,35 +1101,11 @@ void Spell::DoAllEffectOnTarget(TargetInfo *target)
         // Add bonuses and fill damageInfo struct
         else
         {
-            // Chain Lightning - spell coeff bonus based on jump
-            float chainJumpCoeff = 1.0f;
- 
-            if (m_caster->GetTypeId() == TYPEID_PLAYER)
-            {
-                for (uint8 i = 0; i < MAX_EFFECT_INDEX; i++)
-                {
-                    if (m_spellInfo->EffectChainTarget[SpellEffectIndex(i)])
-                    {
-                        uint8 chainTarget = 0;
+            float dmgMultiplier = 1.0f;
+            if (m_damageIndex >= 0 && m_applyMultiplierMask & (1 << m_damageIndex))
+                dmgMultiplier = m_damageMultipliers[m_damageIndex];
 
-                        for(TargetList::const_iterator ihit = m_UniqueTargetInfo.begin(); ihit != m_UniqueTargetInfo.end(); ++ihit)
-                        {
-                            chainTarget++;
-                            if (ihit->targetGUID == unitTarget->GetObjectGuid() && ihit->effectMask & (1<<i))
-                            {
-                                if (chainTarget == 2)
-                                    chainJumpCoeff = 0.7f;
-                                else if (chainTarget == 3)
-                                    chainJumpCoeff = 0.49f;
-                                else if (chainTarget == 4) // with the glyph
-                                    chainJumpCoeff = 0.34f;
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-            caster->CalculateSpellDamage(&damageInfo, m_damage, m_spellInfo, m_attackType, chainJumpCoeff);
+            caster->CalculateSpellDamage(&damageInfo, m_damage, m_spellInfo, m_attackType, dmgMultiplier);
         }
 
         unitTarget->CalculateAbsorbResistBlock(caster, &damageInfo, m_spellInfo);
@@ -1197,6 +1173,19 @@ void Spell::DoAllEffectOnTarget(TargetInfo *target)
         if (m_canTrigger && missInfo != SPELL_MISS_REFLECT)
             caster->ProcDamageAndSpell(unit, real_caster ? procAttacker : PROC_FLAG_NONE, procVictim, procEx, 0, m_attackType, m_spellInfo);
     }
+
+    // Update damage multipliers
+    for (uint8 effectNumber = 0; effectNumber < MAX_EFFECT_INDEX; ++effectNumber)
+        if (mask & (1 << effectNumber) && m_applyMultiplierMask & (1 << effectNumber))
+        {
+            // Get multiplier
+            float multiplier = m_spellInfo->DmgMultiplier[effectNumber];
+            // Apply multiplier mods
+            if (real_caster)
+                if (Player* modOwner = real_caster->GetSpellModOwner())
+                    modOwner->ApplySpellMod(m_spellInfo->Id, SPELLMOD_EFFECT_PAST_FIRST, multiplier, this);
+            m_damageMultipliers[effectNumber] *= multiplier;
+        }
 
     // Call scripted function for AI if this spell is casted upon a creature
     if (unit->GetTypeId() == TYPEID_UNIT)
@@ -1353,17 +1342,7 @@ void Spell::DoSpellHitOnUnit(Unit *unit, uint32 effectMask, bool isReflected)
     {
         if (effectMask & (1 << effectNumber))
         {
-            HandleEffects(unit, NULL, NULL, SpellEffectIndex(effectNumber), m_damageMultipliers[effectNumber]);
-            if ( m_applyMultiplierMask & (1 << effectNumber) )
-            {
-                // Get multiplier
-                float multiplier = m_spellInfo->DmgMultiplier[effectNumber];
-                // Apply multiplier mods
-                if (realCaster)
-                    if(Player* modOwner = realCaster->GetSpellModOwner())
-                        modOwner->ApplySpellMod(m_spellInfo->Id, SPELLMOD_EFFECT_PAST_FIRST, multiplier, this);
-                m_damageMultipliers[effectNumber] *= multiplier;
-            }
+            HandleEffects(unit, NULL, NULL, SpellEffectIndex(effectNumber));
         }
     }
 
@@ -1476,8 +1455,7 @@ void Spell::HandleDelayedSpellLaunch(TargetInfo *target)
     unitTarget = unit;
 
     // Reset damage/healing counter
-    m_damage = 0;
-    m_healing = 0; // healing maybe not needed at this point
+    ResetEffectDamageAndHeal(); // healing maybe not needed at this point
 
     // Fill base damage struct (unitTarget - is real spell target)
     SpellNonMeleeDamage damageInfo(caster, unitTarget, m_spellInfo->Id, m_spellSchoolMask);
@@ -1485,26 +1463,40 @@ void Spell::HandleDelayedSpellLaunch(TargetInfo *target)
     // keep damage amount for reflected spells
     if (missInfo == SPELL_MISS_NONE || (missInfo == SPELL_MISS_REFLECT && target->reflectResult == SPELL_MISS_NONE))
     {
+        std::bitset<MAX_EFFECT_INDEX> update_mult;
+
         for (int32 effectNumber = 0; effectNumber < MAX_EFFECT_INDEX; ++effectNumber)
         {
             if (mask & (1 << effectNumber) && IsEffectHandledOnDelayedSpellLaunch(m_spellInfo, SpellEffectIndex(effectNumber)))
             {
-                HandleEffects(unit, NULL, NULL, SpellEffectIndex(effectNumber), m_damageMultipliers[effectNumber]);
+                HandleEffects(unit, NULL, NULL, SpellEffectIndex(effectNumber));
                 if ( m_applyMultiplierMask & (1 << effectNumber) )
                 {
-                    // Get multiplier
-                    float multiplier = m_spellInfo->DmgMultiplier[effectNumber];
-                    // Apply multiplier mods
-                    if (real_caster)
-                        if(Player* modOwner = real_caster->GetSpellModOwner())
-                            modOwner->ApplySpellMod(m_spellInfo->Id, SPELLMOD_EFFECT_PAST_FIRST, multiplier, this);
-                    m_damageMultipliers[effectNumber] *= multiplier;
+                    update_mult[effectNumber] = true;
                 }
             }
         }
 
         if (m_damage > 0)
-            caster->CalculateSpellDamage(&damageInfo, m_damage, m_spellInfo, m_attackType);
+        {
+            float dmgMultiplier = 1.0f;
+            if (m_damageIndex >= 0 && m_applyMultiplierMask & (1 << m_damageIndex))
+                dmgMultiplier = m_damageMultipliers[m_damageIndex];
+            caster->CalculateSpellDamage(&damageInfo, m_damage, m_spellInfo, m_attackType, dmgMultiplier);
+        }
+
+        // Update damage multipliers
+        for (int32 effectNumber = 0; effectNumber < MAX_EFFECT_INDEX; ++effectNumber)
+            if (update_mult[effectNumber])
+            {
+                // Get multiplier
+                float multiplier = m_spellInfo->DmgMultiplier[effectNumber];
+                // Apply multiplier mods
+                if (real_caster)
+                    if (Player* modOwner = real_caster->GetSpellModOwner())
+                        modOwner->ApplySpellMod(m_spellInfo->Id, SPELLMOD_EFFECT_PAST_FIRST, multiplier, this);
+                m_damageMultipliers[effectNumber] *= multiplier;
+            }
     }
 
     target->damage = damageInfo.damage;
@@ -1737,7 +1729,7 @@ void Spell::SetTargetMap(SpellEffectIndex effIndex, uint32 targetMode, UnitList&
                     unMaxTargets = 4;
                     break;
                 case 30843:                                 // Enfeeble TODO: exclude top threat target from target selection
-                case 42005:                                 // Bloodboil TODO: need to be 5 targets(players) furthest away from caster
+                case 42005:                                 // Bloodboil
                 case 55665:                                 // Life Drain (h)
                 case 58917:                                 // Consume Minions
                 case 64604:                                 // Nature Bomb Freya
@@ -2153,8 +2145,14 @@ void Spell::SetTargetMap(SpellEffectIndex effIndex, uint32 targetMode, UnitList&
         case TARGET_ALL_ENEMY_IN_AREA:
         {
             FillAreaTargets(targetUnitMap, radius, PUSH_DEST_CENTER, SPELL_TARGETS_AOE_DAMAGE);
-
-            if (m_spellInfo->Id == 42005)                   // Bloodboil
+            if (m_spellInfo->Id == 62240 || m_spellInfo->Id == 62920)      // Solar Flare
+            {
+                if (SpellAuraHolder *holder = m_caster->GetSpellAuraHolder(62239))
+                    unMaxTargets = holder->GetStackAmount();
+                else
+                    unMaxTargets = 1;
+            }
+            else if (m_spellInfo->Id == 42005)                   // Bloodboil
             {
                 // manually cuting, because the spell hits only the 5 furthest away targets
                 if (targetUnitMap.size() > unMaxTargets)
@@ -4897,7 +4895,7 @@ void Spell::HandleThreatSpells()
     DEBUG_FILTER_LOG(LOG_FILTER_SPELL_CAST, "Spell %u added an additional %f threat for %s %u target(s)", m_spellInfo->Id, threat, positive ? "assisting" : "harming", uint32(m_UniqueTargetInfo.size()));
 }
 
-void Spell::HandleEffects(Unit *pUnitTarget,Item *pItemTarget,GameObject *pGOTarget,SpellEffectIndex i, float DamageMultiplier)
+void Spell::HandleEffects(Unit *pUnitTarget, Item *pItemTarget, GameObject *pGOTarget, SpellEffectIndex i)
 {
     unitTarget = pUnitTarget;
     itemTarget = pItemTarget;
@@ -4905,7 +4903,7 @@ void Spell::HandleEffects(Unit *pUnitTarget,Item *pItemTarget,GameObject *pGOTar
 
     uint8 eff = m_spellInfo->Effect[i];
 
-    damage = int32(CalculateDamage(i, unitTarget) * DamageMultiplier);
+    damage = CalculateDamage(i, unitTarget);
 
     DEBUG_FILTER_LOG(LOG_FILTER_SPELL_CAST, "Spell %u Effect%d : %u Targets: %s, %s, %s",
         m_spellInfo->Id, i, eff,
@@ -4921,6 +4919,10 @@ void Spell::HandleEffects(Unit *pUnitTarget,Item *pItemTarget,GameObject *pGOTar
     {
         sLog.outError("WORLD: Spell FX %d > TOTAL_SPELL_EFFECTS ", eff);
     }
+
+    // store effect index who did the damage (for picking correct damage multiplier)
+    if (m_damage > 0)
+        m_damageIndex = i;
 }
 
 void Spell::AddTriggeredSpell( uint32 spellId )
@@ -7735,6 +7737,7 @@ void Spell::ResetEffectDamageAndHeal()
 {
     m_damage = 0;
     m_healing = 0;
+    m_damageIndex = -1;
 }
 
 void Spell::SelectMountByAreaAndSkill(Unit* target, SpellEntry const* parentSpell, uint32 spellId75, uint32 spellId150, uint32 spellId225, uint32 spellId300, uint32 spellIdSpecial)
@@ -7934,21 +7937,17 @@ bool Spell::FillCustomTargetMap(SpellEffectIndex i, UnitList &targetUnitMap)
         {
             FillAreaTargets(targetUnitMap, radius, PUSH_DEST_CENTER, SPELL_TARGETS_ALL);
             targetUnitMap.remove(m_caster);
+            break;
         }
         case 43263: // Ghoul Taunt (Army of the Dead)
         {           // exclude Player and WorldBoss targets
             FillAreaTargets(targetUnitMap, radius, PUSH_DEST_CENTER, SPELL_TARGETS_AOE_DAMAGE);
             for (UnitList::iterator itr = targetUnitMap.begin(); itr != targetUnitMap.end();)
             {
-                Creature *pTmp = (Creature*)(*itr);
-                if ( ((*itr) && (*itr)->GetTypeId() == TYPEID_PLAYER) || (pTmp && pTmp->IsWorldBoss()) )
-                {
-                    targetUnitMap.erase(itr);
-                    targetUnitMap.sort();
-                    itr = targetUnitMap.begin();
-                    continue;
-                }
-                itr++;
+                if (!*itr || (*itr)->GetTypeId() == TYPEID_PLAYER || static_cast<Creature*>(*itr)->IsWorldBoss())
+                    itr = targetUnitMap.erase(itr);
+                else
+                    ++itr;
             }
             if (!targetUnitMap.empty())
                 return true;
@@ -7973,13 +7972,13 @@ bool Spell::FillCustomTargetMap(SpellEffectIndex i, UnitList &targetUnitMap)
             FillAreaTargets(targetUnitMap, radius, PUSH_DEST_CENTER, SPELL_TARGETS_AOE_DAMAGE);
             break;
         }
-        case 48018:
-        case 60854:
+        case 48018: // Demonic Circle: Summon
+        case 60854: // Demonic Circle: Clear
         {
             targetUnitMap.push_back(m_caster);
             break;
         }
-        case 48743:
+        case 48743: // Death Pact
         {
             if (i != EFFECT_INDEX_1)
                 return false;
@@ -8077,23 +8076,6 @@ bool Spell::FillCustomTargetMap(SpellEffectIndex i, UnitList &targetUnitMap)
                 targetUnitMap.remove(unitTarget);
             return true;
         }
-        case 50286: // Starfall - exclude stealthed targets
-        case 53196: // rank 2
-        case 53197: // rank 3
-        case 53198: // rank 4
-        {
-            FillAreaTargets(targetUnitMap, radius, PUSH_DEST_CENTER, SPELL_TARGETS_AOE_DAMAGE);
-            for (UnitList::iterator itr = targetUnitMap.begin(), next; itr != targetUnitMap.end(); itr = next)
-            {
-                next = itr;
-                ++next;
-
-                if (!(*itr)->isVisibleForOrDetect(m_caster, m_caster, false, false, false))
-                    targetUnitMap.erase(itr);
-            }
-            if (!targetUnitMap.empty())
-                return true;
-        }
         case 57143: // Life Burst (Wyrmrest Skytalon) 
         {
             // hack - spell is AoE but implicitTargets dont match here :/
@@ -8127,27 +8109,9 @@ bool Spell::FillCustomTargetMap(SpellEffectIndex i, UnitList &targetUnitMap)
             SetTargetMap(SpellEffectIndex(i), TARGET_RANDOM_ENEMY_CHAIN_IN_AREA, targetUnitMap);
             break;
         }
-        case 61920: // Supercharge (Iron Council: Ulduar)
-        {
-            UnitList tempTargetUnitMap;
-            FillAreaTargets(tempTargetUnitMap, radius, PUSH_DEST_CENTER, SPELL_TARGETS_NOT_HOSTILE);
-
-            for (UnitList::iterator itr = tempTargetUnitMap.begin(),next; itr != tempTargetUnitMap.end(); itr++)
-            {
-                if ((*itr) &&
-                    ((*itr)->GetEntry() == 32867 || // Steelbreaker
-                    (*itr)->GetEntry() == 32927 ||  // Runemaster Molgeim
-                    (*itr)->GetEntry() == 32857)    // Stormcaller Brundir
-                    )
-                {
-                    targetUnitMap.push_back(*itr);
-                }
-            }
-            break;
-        }
         case 61999: // Raise ally
         {
-            WorldObject* result = FindCorpseUsing <MaNGOS::RaiseAllyObjectCheck>  ();
+            WorldObject* result = FindCorpseUsing<MaNGOS::RaiseAllyObjectCheck>();
             if (result)
                 targetUnitMap.push_back((Unit*)result);
             else
@@ -8170,21 +8134,12 @@ bool Spell::FillCustomTargetMap(SpellEffectIndex i, UnitList &targetUnitMap)
                 return true;
             break;
         }
-        case 62240: // Solar Flare (Freya's elder)
-        case 62920:
-        {
-            FillAreaTargets(targetUnitMap, radius, PUSH_DEST_CENTER, SPELL_TARGETS_AOE_DAMAGE);
-            targetUnitMap.resize(m_caster->GetSpellAuraHolder(62239) ? m_caster->GetSpellAuraHolder(62239)->GetStackAmount() : 1);
-
-            if (!targetUnitMap.empty())
-                return true;
-        }
         case 62343: // Heat (remove all except active iron constructs)
         {
             UnitList tempTargetUnitMap;
             FillAreaTargets(tempTargetUnitMap, radius, PUSH_DEST_CENTER, SPELL_TARGETS_ALL);
 
-            for (UnitList::iterator itr = tempTargetUnitMap.begin(),next; itr != tempTargetUnitMap.end(); itr++)
+            for (UnitList::iterator itr = tempTargetUnitMap.begin(),next; itr != tempTargetUnitMap.end(); ++itr)
             {
                 if ((*itr) && (*itr)->GetEntry() == 33121 &&
                     !(*itr)->HasAura(62468) && !(*itr)->HasAura(62373) &&
@@ -8201,7 +8156,7 @@ bool Spell::FillCustomTargetMap(SpellEffectIndex i, UnitList &targetUnitMap)
             UnitList tempTargetUnitMap;
             FillAreaTargets(tempTargetUnitMap, radius, PUSH_DEST_CENTER, SPELL_TARGETS_NOT_HOSTILE);
 
-            for (UnitList::iterator itr = tempTargetUnitMap.begin(),next; itr != tempTargetUnitMap.end(); itr++)
+            for (UnitList::iterator itr = tempTargetUnitMap.begin(),next; itr != tempTargetUnitMap.end(); ++itr)
             {
                 if ((*itr) && (*itr)->GetEntry() == 33121 && (*itr)->HasAura(62468)) // check for stun aura
                     targetUnitMap.push_back(*itr);
@@ -8220,7 +8175,10 @@ bool Spell::FillCustomTargetMap(SpellEffectIndex i, UnitList &targetUnitMap)
             FillAreaTargets(targetUnitMap, radius, PUSH_DEST_CENTER, SPELL_TARGETS_AOE_DAMAGE);
             break;
         }
-        case 65919: case 67858: case 67859: case 67860: // Anub'arak Cast Check Ice Spell (Trial of the Crusader - Anub'arak)
+        case 65919: // Anub'arak Cast Check Ice Spell (Trial of the Crusader - Anub'arak)
+        case 67858:
+        case 67859:
+        case 67860:
         {
             m_caster->CastSpell(m_caster, 66181, true);
             m_targets.setDestination(m_caster->GetPositionX(), m_caster->GetPositionY(), m_caster->GetPositionZ());
@@ -8251,12 +8209,15 @@ bool Spell::FillCustomTargetMap(SpellEffectIndex i, UnitList &targetUnitMap)
                 if (!m_bOneTargetHaveAura && !targetUnitMap.empty())
                 {
                     uint32 t = 0;
-                    std::list<Unit*>::iterator iter = targetUnitMap.begin();
-                    while(iter!= targetUnitMap.end() && (*iter)->IsWithinDist(m_caster, radius))
-                        ++t, ++iter;
+                    UnitList::iterator iter = targetUnitMap.begin();
+                    while (iter != targetUnitMap.end() && (*iter)->IsWithinDist(m_caster, radius))
+                    {
+                        ++t;
+                        ++iter;
+                    }
 
                     iter = targetUnitMap.begin();
-                    std::advance(iter, rand() % t);
+                    std::advance(iter, urand(0, t-1));
                     if (*iter)
                         (*iter)->CastSpell((*iter), 67574, true);
                 }
@@ -8277,7 +8238,8 @@ bool Spell::FillCustomTargetMap(SpellEffectIndex i, UnitList &targetUnitMap)
             }
             break;
         }
-        case 66862: case 67681: // Radiance (Trial of the Champion - Eadric the Pure)
+        case 66862: // Radiance (Trial of the Champion - Eadric the Pure)
+        case 67681:
         {
             UnitList tmpUnitMap;
             FillAreaTargets(tmpUnitMap, radius, PUSH_DEST_CENTER, SPELL_TARGETS_AOE_DAMAGE);
@@ -8327,9 +8289,11 @@ bool Spell::FillCustomTargetMap(SpellEffectIndex i, UnitList &targetUnitMap)
             break;
         }
         case 71341:
-        if (i != EFFECT_INDEX_1)
-            return false;
-        // no break
+        {
+            if (i != EFFECT_INDEX_1)
+                return false;
+            // no break
+        }
         case 71390:                                     // Pact of the Darkfallen
         {
             UnitList tempTargetUnitMap;
@@ -8366,7 +8330,7 @@ bool Spell::FillCustomTargetMap(SpellEffectIndex i, UnitList &targetUnitMap)
             if (!tempTargetUnitMap.empty())
             {
                 UnitList::iterator i = tempTargetUnitMap.begin();
-                advance(i, rand()% tempTargetUnitMap.size());
+                advance(i, urand(0, tempTargetUnitMap.size() - 1));
                 targetUnitMap.push_back(*i);
                 return true;
             }
