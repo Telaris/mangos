@@ -2785,10 +2785,9 @@ void PlayerbotAI::UpdateAI(const uint32 p_time)
     if (movementType == CHASE_MOTION_TYPE || movementType == POINT_MOTION_TYPE)
     {
         float x, y, z;
-        m_bot->GetMotionMaster()->GetDestination(x, y, z);
-        if (x != m_destX || y != m_destY || z != m_destZ)
+        if (m_bot->GetMotionMaster()->GetDestination(x, y, z))
         {
-            m_bot->MonsterMoveWithSpeed(x, y, z, 28);
+            m_bot->MonsterMoveWithSpeed(x, y, z, DEFAULT_WALK_SPEED);
             m_destX = x;
             m_destY = y;
             m_destZ = z;
@@ -4289,7 +4288,8 @@ bool PlayerbotAI::FollowCheckTeleport(WorldObject &obj)
     // if bot has strayed too far from the master, teleport bot
  
     if (!m_bot->IsWithinDistInMap(&obj, 50, true) && GetMaster()->isAlive() && !GetMaster()->IsTaxiFlying())
-     {       
+    {
+        m_bot->GetMotionMaster()->Clear();
         m_ignoreAIUpdatesUntilTime = time(0) + 6;
         PlayerbotChatHandler ch(GetMaster());
         if (!ch.teleport(*m_bot))
