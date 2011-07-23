@@ -159,7 +159,7 @@ public:
         MOVEMENT_FOLLOW             = 0x01,
         MOVEMENT_STAY               = 0x02
     };
-	
+
     enum TaskFlags
     {
         NONE                        = 0x00,

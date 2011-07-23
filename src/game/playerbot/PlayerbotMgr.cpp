@@ -552,7 +552,7 @@ void PlayerbotMgr::HandleMasterIncomingPacket(const WorldPacket& packet)
         case CMSG_GOSSIP_HELLO:
          {
             DEBUG_LOG("PlayerbotMgr: Received CMSG_GOSSIP_HELLO");
- 
+
             WorldPacket p(packet);    //WorldPacket packet for CMSG_GOSSIP_HELLO, (8)
             ObjectGuid guid;
             p.rpos(0);                //reset packet pointer
@@ -581,7 +581,7 @@ void PlayerbotMgr::HandleMasterIncomingPacket(const WorldPacket& packet)
 
                     if (!(itr->second.npc_option_npcflag & npcflags))
                         continue;
- 
+
                     switch (itr->second.option_id)
                     {
                         case GOSSIP_OPTION_TAXIVENDOR:
@@ -666,7 +666,7 @@ void PlayerbotMgr::HandleMasterIncomingPacket(const WorldPacket& packet)
                     bot->GetPlayerbotAI()->SellGarbage();
             }
             return;
-        }  
+        }
                case CMSG_NAME_QUERY:
                case MSG_MOVE_START_FORWARD:
                case MSG_MOVE_STOP:
@@ -694,7 +694,7 @@ void PlayerbotMgr::HandleMasterIncomingPacket(const WorldPacket& packet)
                 out << "masterin: " << oc;
                 sLog.outError(out.str().c_str());
                }
-             
+
     }
 }
 void PlayerbotMgr::HandleMasterOutgoingPacket(const WorldPacket& packet)

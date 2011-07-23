@@ -75,7 +75,8 @@ PlayerbotAI::PlayerbotAI(PlayerbotMgr* const mgr, Player* const bot) :
     m_combatOrder(ORDERS_NONE), m_ScenarioType(SCENARIO_PVEEASY),
     m_TimeDoneEating(0), m_TimeDoneDrinking(0),
     m_CurrentlyCastingSpellId(0), m_spellIdCommand(0),
-    m_classAI(0), m_taxiMaster(ObjectGuid())
+    m_targetGuidCommand(0), m_classAI(0),
+    m_taxiMaster(ObjectGuid())
 {
 
     // set bot state and needed item list
@@ -577,7 +578,7 @@ bool PlayerbotAI::IsItemUseful(uint32 itemid)
                         return true;
                     break;
                 case ITEM_SUBCLASS_TAILORING_PATTERN:
-                    if (m_bot->HasSkill(SKILL_TAILORING))
+                   if (m_bot->HasSkill(SKILL_TAILORING))
                         return true;
                     break;
                 case ITEM_SUBCLASS_ENGINEERING_SCHEMATIC:
@@ -1967,7 +1968,7 @@ void PlayerbotAI::DoFlight()
         DEBUG_LOG("PlayerbotAI: DoFlight - %s not found or you can't interact with it.", m_taxiMaster.GetString().c_str());
         return;
     }
- 
+
     m_bot->ActivateTaxiPathTo(m_taxiNodes, npc);
 }
 
@@ -2026,7 +2027,7 @@ void PlayerbotAI::DoLoot()
             // clear movement target, take next target on next update
             m_bot->GetMotionMaster()->Clear();
             m_bot->GetMotionMaster()->MoveIdle();
-            return;    
+            return;
          }
     }
 
@@ -2170,7 +2171,7 @@ void PlayerbotAI::DoLoot()
         // determine bot's skill value for object's required skill
         if (skillId != SKILL_NONE)
             SkillValue = uint32(m_bot->GetPureSkillValue(skillId));
- 
+
         // bot has the specific skill or object requires no skill at all
         if ((m_bot->HasSkill(skillId) && skillId != SKILL_NONE) || (skillId == SKILL_NONE && go))
         {
@@ -2865,7 +2866,8 @@ void PlayerbotAI::UpdateAI(const uint32 p_time)
             if (pTarget)
                 CastSpell(m_spellIdCommand, *pTarget);
             m_spellIdCommand = 0;
-            m_targetGuidCommand.Clear();
+            //m_targetGuidCommand.Clear();
+            m_targetGuidCommand = ObjectGuid();
         }
 
         //if master is unmounted, unmount the bot
@@ -4093,7 +4095,7 @@ void PlayerbotAI::findNearbyCreature()
             }
         }
     }
-}	
+}
 
 // use item on self
 void PlayerbotAI::UseItem(Item *item)
@@ -4267,7 +4269,7 @@ bool PlayerbotAI::TradeCopper(uint32 copper)
 bool PlayerbotAI::FollowCheckTeleport(WorldObject &obj)
 {
     // if bot has strayed too far from the master, teleport bot
- 
+
     if (!m_bot->IsWithinDistInMap(&obj, 50, true) && GetMaster()->isAlive() && !GetMaster()->IsTaxiFlying())
     {
         m_bot->GetMotionMaster()->Clear();
@@ -5253,14 +5255,21 @@ void PlayerbotAI::HandleCommand(const std::string& text, Player& fromPlayer)
             collset += ", quest";
         if (HasCollectFlag(COLLECT_FLAG_SKIN))
             collset += ", skin";
-        if (HasCollectFlag(COLLECT_FLAG_COMBAT))
-            collset += " items after combat";
-        else
-            collset += " items";
+        if (collset.length() > 1)
+        {
+            if (HasCollectFlag(COLLECT_FLAG_COMBAT))
+                collset += " items after combat";
+            else
+                collset += " items";
+        }
 
         if (HasCollectFlag(COLLECT_FLAG_NEAROBJECT))
         {
-            collset += " and nearby objects (";
+             if (collset.length() > 1)
+                collset += " and ";
+            else
+                collset += "  ";    // padding for substr
+            collset += "nearby objects (";
             if (!m_collectObjects.empty())
             {
                 std::string strobjects = "";
